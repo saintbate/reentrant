@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reentrant"
+version = "0.1.0"
+description = "ISR-safety static analysis for STM32 firmware"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Nicholas Bateman", email = "batemannick66@gmail.com" }]
+keywords = ["embedded", "stm32", "static-analysis", "isr", "firmware"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "tree-sitter>=0.23.0",
+    "tree-sitter-c>=0.23.0",
+    "click>=8.1",
+    "anthropic>=0.40.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[project.urls]
+Repository = "https://github.com/saintbate/reentrant"
+
+[project.scripts]
+reentrant = "reentrant.cli:main"
+
+[tool.ruff]
+line-length = 100
+exclude = [".venv", "tests/real_world", "tests/corpus"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true

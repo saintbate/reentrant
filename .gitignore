@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+tests/real_world/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.sarif

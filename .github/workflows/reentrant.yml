@@ -1,0 +1,44 @@
+name: ISR Safety
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  analyze:
+    name: Reentrant ISR-safety analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # required for SARIF upload (free for public repos)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install reentrant
+        run: pip install reentrant
+
+      - name: Run ISR safety analysis
+        id: reentrant
+        # Exit code 1 means findings were found — we still want the upload step
+        # to run, so continue-on-error is set and we re-raise at the end.
+        run: reentrant analyze . --sarif --no-explain > reentrant.sarif
+        continue-on-error: true
+
+      - name: Upload to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reentrant.sarif
+          # Shown as the tool name in the Security tab
+          category: reentrant
+
+      - name: Fail if findings were found
+        if: steps.reentrant.outcome == 'failure'
+        run: |
+          echo "::error::Reentrant found ISR-safety issues. See the Security tab for details."
+          exit 1
