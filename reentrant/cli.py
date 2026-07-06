@@ -4,6 +4,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import click
@@ -11,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from reentrant.analysis.checker import analyze
+from reentrant.diffscope import filter_by_diff, git_diff_lines
 from reentrant.model.findings import Confidence, Finding
 from reentrant.parse.loader import load_repo
 from reentrant.report.sarif import to_sarif
@@ -37,7 +39,15 @@ def _run_explain(findings: list[Finding]) -> None:
 @click.option("--json", "output_json", is_flag=True, help="Output findings as JSON.")
 @click.option("--sarif", "output_sarif", is_flag=True, help="Output findings as SARIF.")
 @click.option("--no-explain", is_flag=True, help="Skip the LLM explanation layer.")
-def analyze_cmd(path: Path, output_json: bool, output_sarif: bool, no_explain: bool) -> None:
+@click.option(
+    "--diff-base",
+    default=None,
+    help="Git ref to diff against (e.g. origin/main). Scopes findings to lines "
+         "touched between this ref and HEAD; pre-existing findings are suppressed.",
+)
+def analyze_cmd(
+    path: Path, output_json: bool, output_sarif: bool, no_explain: bool, diff_base: str | None
+) -> None:
     """Analyze a file or directory for ISR-safety bugs."""
     root = path if path.is_dir() else path.parent
     files = load_repo(root)
@@ -50,6 +60,19 @@ def analyze_cmd(path: Path, output_json: bool, output_sarif: bool, no_explain: b
 
     console.print(f"[dim]Analyzing {len(files)} file(s)…[/dim]")
     findings = analyze(files)
+
+    if diff_base is not None:
+        try:
+            changed_lines = git_diff_lines(root, diff_base)
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Failed to diff against '{diff_base}': {e.stderr.strip()}[/red]")
+            raise SystemExit(2) from e
+        before = len(findings)
+        findings = filter_by_diff(findings, changed_lines, root)
+        console.print(
+            f"[dim]Diff scope ({diff_base}): {len(findings)}/{before} finding(s) "
+            "touch changed lines.[/dim]"
+        )
 
     if findings and not no_explain:
         _run_explain(findings)
