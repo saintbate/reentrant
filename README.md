@@ -185,6 +185,10 @@ jobs:
         run: exit 1
 ```
 
+Findings appear as inline annotations on the PR diff in the **Security** tab.
+
+> The SARIF upload requires GitHub Advanced Security. This is free for all public repositories; private repositories need a GHAS licence.
+
 ## Feedback loop
 
 Disagree with a finding? Reply on the PR:
@@ -211,16 +215,23 @@ the base repo's Actions run write access to a fork's branch. Feedback on a fork 
 acknowledged with a comment but not persisted automatically; a maintainer can run the
 CLI command above locally instead.
 
-Findings appear as inline annotations on the PR diff in the **Security** tab.
-
-> The SARIF upload requires GitHub Advanced Security. This is free for all public repositories; private repositories need a GHAS licence.
-
 ## Limitations
 
 - C only (no C++)
 - Single-core Cortex-M — does not model multi-core shared memory (STM32H7 M4/M7)
 - Does not model OS-level mutual exclusion (mutexes, semaphores) — only interrupt-disable guards
 - Does not detect ABA / lock-free algorithmic correctness issues
+- **Whole-repo analysis assumes a single build target.** Symbol and function identity are
+  scoped by declaring file for `static` symbols, but non-static globals and function names
+  share one namespace across the entire analyzed tree. This is a non-issue for a normal
+  firmware repository (which only has one `main()`, one `SysTick_Handler`, etc.), but a
+  repo that bundles many mutually-exclusive build targets in one source tree — vendor
+  example-project collections (e.g. official ST Cube packages with 200+ example projects),
+  or a codebase supporting many MCU families/architectures (ChibiOS's per-architecture
+  `chcore.c`, Betaflight's per-vendor `system_stm32*.c`) — can produce false positives
+  where analysis incorrectly treats same-named symbols from different, never-linked-together
+  targets as one shared symbol. Confirmed via `tests/measure_fp.py` against real ST Cube,
+  ChibiOS, and Betaflight sources. Not fixed today; would need build-target-aware scoping.
 
 ## Development
 

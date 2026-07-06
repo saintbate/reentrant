@@ -94,6 +94,25 @@ def _extract_declarator_names(node: Node, source: bytes) -> list[str]:
     return names
 
 
+def _declarator_has_volatile(node: Node, source: bytes) -> bool:
+    """True if `volatile` qualifies the pointer itself rather than the base
+    type, e.g. `List_t * volatile pxDelayedTaskList` (FreeRTOS's own idiom
+    for several kernel-internal globals: pxCurrentTCB, pxDelayedTaskList,
+    etc.). tree-sitter-c parses this as a `type_qualifier` child of the
+    `pointer_declarator`, not a sibling of the base type field — the check
+    in build_symbol_table only looks at the latter, so this catches the
+    former, recursing through nested pointer/array declarators. Checks the
+    qualifier's actual text since `const` is the same node type.
+    """
+    if node.type not in ("pointer_declarator", "array_declarator", "init_declarator"):
+        return False
+    return any(
+        (child.type == "type_qualifier" and node_text(child, source) == "volatile")
+        or _declarator_has_volatile(child, source)
+        for child in node.children
+    )
+
+
 def build_symbol_table(files: list[ParsedFile]) -> SymbolTable:
     table = SymbolTable()
 
@@ -127,7 +146,11 @@ def build_symbol_table(files: list[ParsedFile]) -> SymbolTable:
             if "extern" in full_text:
                 continue
 
-            volatile = "volatile" in full_text or bool(_CMSIS_VOLATILE_TYPES.search(full_text))
+            volatile = (
+                "volatile" in full_text
+                or bool(_CMSIS_VOLATILE_TYPES.search(full_text))
+                or _declarator_has_volatile(decl_node, source)
+            )
             is_static = "static" in full_text
 
             for name in _extract_declarator_names(decl_node, source):

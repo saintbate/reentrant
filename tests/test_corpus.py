@@ -64,6 +64,10 @@ def test_bug_detected(filename: str, expected_var: str) -> None:
     "safe_12_volatile_threshold.c",
     # non-ISR write is guarded — isr-stale-read must respect guards too
     "safe_13_guarded_threshold.c",
+    # `Type * volatile name` — volatile qualifying the pointer itself
+    # (FreeRTOS's own idiom for pxCurrentTCB/pxDelayedTaskList), a real-world
+    # false positive found via tests/measure_fp.py
+    "safe_14_pointer_volatile.c",
 ])
 def test_no_false_positive(filename: str) -> None:
     findings = _analyze_file(filename)

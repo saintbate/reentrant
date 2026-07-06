@@ -41,6 +41,10 @@ Repository = "https://github.com/saintbate/reentrant"
 [project.scripts]
 reentrant = "reentrant.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["tests/real_world", "tests/corpus", ".venv"]
+
 [tool.ruff]
 line-length = 100
 exclude = [".venv", "tests/real_world", "tests/corpus"]
