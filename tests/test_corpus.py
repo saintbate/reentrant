@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from reentrant.analysis.checker import analyze
+from reentrant.model.rules import ISR_BLOCKING_CALL
 from reentrant.parse.loader import load_repo
 
 CORPUS = Path(__file__).parent / "corpus"
@@ -50,12 +51,37 @@ def test_bug_detected(filename: str, expected_var: str) -> None:
     "safe_07_port_critical.c",
     # CMSIS __IO type alias treated as volatile
     "safe_08_cmsis_io.c",
+    # malloc() called only outside ISR context — not flagged
+    "safe_09_malloc_outside_isr.c",
+    # xQueueSendFromISR is the ISR-safe variant — not itself flagged
+    "safe_10_freertos_from_isr_variant.c",
+    # CMSIS-RTOS-style inHandlerMode() dual-dispatch wrapper — real-world FP
+    # found via tests/measure_fp.py, must not be flagged
+    "safe_11_freertos_dual_dispatch.c",
 ])
 def test_no_false_positive(filename: str) -> None:
     findings = _analyze_file(filename)
     assert findings == [], (
         f"{filename}: expected zero findings, got {[f.variable for f in findings]}"
     )
+
+
+# ── isr-blocking-call rule: libc / STM32 HAL / FreeRTOS API misuse ───────────
+
+@pytest.mark.parametrize("filename,expected_api", [
+    ("bug_07_malloc_in_isr.c", "malloc"),
+    ("bug_08_hal_blocking_in_isr.c", "HAL_UART_Transmit"),
+    ("bug_09_freertos_non_isr_api.c", "xQueueSend"),
+])
+def test_blocking_call_detected(filename: str, expected_api: str) -> None:
+    findings = _analyze_file(filename)
+    matches = [f for f in findings if f.variable == expected_api]
+    assert matches, (
+        f"{filename}: expected a call to '{expected_api}' to be flagged, "
+        f"got {[f.variable for f in findings]}"
+    )
+    assert matches[0].rule_id == ISR_BLOCKING_CALL.id
+    assert matches[0].explanation, "blocking-call findings must self-explain from the API table"
 
 
 # ── Static-scope isolation — multi-file scenarios ─────────────────────────────

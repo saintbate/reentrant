@@ -21,12 +21,29 @@ in a critical section.
 
 ## What it detects
 
+**`isr-shared-var`** — a global/static variable is written in an ISR and accessed
+in main-loop code without `volatile` or a critical-section guard.
+
 | Pattern | Detected |
 |---|---|
 | Global/static written in `*_IRQHandler`, read in main | ✓ |
 | HAL weak callbacks (`HAL_UART_RxCpltCallback`, etc.) | ✓ |
 | Transitive ISR context via call graph | ✓ |
 | Compound writes (`\|=`, `&=`, `++`, `--`) | ✓ |
+
+**`isr-blocking-call`** — a call to a known blocking/non-reentrant API from ISR
+context (or a function transitively reachable from one), checked against a
+curated table ([`reentrant/data/isr_unsafe_apis.toml`](reentrant/data/isr_unsafe_apis.toml)):
+
+| Category | Examples |
+|---|---|
+| libc | `malloc`, `free`, `printf` |
+| STM32 HAL blocking variants | `HAL_Delay`, `HAL_UART_Transmit`, `HAL_SPI_Transmit`, `HAL_I2C_Master_Transmit` |
+| FreeRTOS APIs missing their `FromISR` counterpart | `xQueueSend`, `xQueueReceive`, `xSemaphoreGive`, `xSemaphoreTake`, `vTaskDelay` |
+
+A call is *not* flagged if the same function also calls the ISR-safe counterpart
+(e.g. `xSemaphoreGiveFromISR`) — that's the CMSIS-RTOS `inHandlerMode()` runtime-dispatch
+pattern every STM32Cube + FreeRTOS project ships, not a bug.
 
 ## What it does NOT flag (safe patterns recognised)
 
@@ -80,7 +97,7 @@ Every rule is Tier 1 (precise enough to fail CI) or Tier 2 (advisory — shown a
 comment, never blocks). The exit code depends **only** on Tier 1: a noisy heuristic
 can never fail your build, no matter how it's classified internally.
 
-Today `isr-shared-var` (the core race check) is the only rule, and it's Tier 1 —
+Both current rules — `isr-shared-var` and `isr-blocking-call` — are Tier 1,
 validated at 0% false positives against the real-world benchmark corpus. Future
 heuristic/dataflow rules will land as Tier 2 first and only get promoted once they
 clear the same bar.

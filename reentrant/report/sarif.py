@@ -5,7 +5,7 @@ from importlib.metadata import version
 from typing import Any
 
 from reentrant.model.findings import Finding
-from reentrant.model.rules import Tier, all_rules
+from reentrant.model.rules import ISR_BLOCKING_CALL, ISR_SHARED_VAR, Tier, all_rules
 
 TOOL_VERSION = version("reentrant")
 
@@ -14,9 +14,10 @@ TOOL_VERSION = version("reentrant")
 _LEVEL_BY_TIER = {Tier.TIER_1: "error", Tier.TIER_2: "warning"}
 
 
-def to_sarif(findings: list[Finding]) -> dict[str, Any]:
-    results = []
-    for f in findings:
+def _build_message(f: Finding) -> str:
+    """Each rule needs its own message shape — a shared variable race and an
+    ISR-unsafe call don't describe the same kind of problem."""
+    if f.rule_id == ISR_SHARED_VAR.id:
         isr_list = ", ".join(f.isr_functions)
         msg = (
             f"Variable '{f.variable}' ({f.type_text}) is accessed in ISR context "
@@ -24,8 +25,21 @@ def to_sarif(findings: list[Finding]) -> dict[str, Any]:
             f"This can cause a data race. Declare as 'volatile' or protect non-ISR accesses with "
             f"__disable_irq()/__enable_irq() (or equivalent)."
         )
-        if f.explanation and not f.explanation.startswith("[suppressed]"):
-            msg += f" {f.explanation}"
+    elif f.rule_id == ISR_BLOCKING_CALL.id:
+        isr_list = ", ".join(f.isr_functions)
+        msg = f"'{f.variable}' is called from ISR context ({isr_list}) but is not ISR-safe."
+    else:
+        msg = f"{f.rule.title}: '{f.variable}'."
+
+    if f.explanation and not f.explanation.startswith("[suppressed]"):
+        msg += f" {f.explanation}"
+    return msg
+
+
+def to_sarif(findings: list[Finding]) -> dict[str, Any]:
+    results = []
+    for f in findings:
+        msg = _build_message(f)
         results.append({
             "ruleId": f.rule_id,
             "level": _LEVEL_BY_TIER[f.tier],

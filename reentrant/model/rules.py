@@ -66,3 +66,16 @@ ISR_SHARED_VAR = register(Rule(
         "guard. This is a potential data race on Cortex-M."
     ),
 ))
+
+ISR_BLOCKING_CALL = register(Rule(
+    id="reentrant/isr-blocking-call",
+    tier=Tier.TIER_1,
+    title="Blocking or non-reentrant call inside ISR context",
+    description=(
+        "A function known to be unsafe in ISR context — a blocking libc/HAL "
+        "call, a non-reentrant allocator call, or a FreeRTOS API missing its "
+        "'FromISR' counterpart — is called inside an ISR (or a function "
+        "transitively reachable from one). See reentrant/data/isr_unsafe_apis.toml "
+        "for the full curated list and the reasoning behind each entry."
+    ),
+))

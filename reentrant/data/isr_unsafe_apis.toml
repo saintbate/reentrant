@@ -1,0 +1,95 @@
+# Curated table of functions that must never be called from ISR context (or
+# from a function transitively reachable from one). This is the real domain
+# knowledge behind the isr-blocking-call rule — kept as data, not code, so
+# it can grow independently of the detector in reentrant/analysis/blocking_calls.py.
+#
+# category:     libc | stm32_hal | freertos
+# blocking:     does the call busy-wait / block the caller?
+# reason:       why it's unsafe in ISR context
+# fix:          one-line remediation shown in the finding's explanation
+# safe_sibling: (optional) the ISR-safe counterpart name. If the same calling
+#               function also calls it, this is a deliberate runtime dispatch
+#               (e.g. CMSIS-RTOS's inHandlerMode() wrappers), not a bug —
+#               see ApiEntry.safe_sibling in reentrant/model/api_table.py.
+
+[malloc]
+category = "libc"
+blocking = false
+reason = "Not reentrant — heap metadata can corrupt if interrupted mid-allocation by another allocation."
+fix = "Avoid dynamic allocation in ISR context; use a pre-allocated buffer or a fixed-size pool."
+
+[free]
+category = "libc"
+blocking = false
+reason = "Not reentrant — same heap-corruption risk as malloc."
+fix = "Avoid freeing memory in ISR context; defer to a deferred-work queue processed in the main loop."
+
+[printf]
+category = "libc"
+blocking = true
+reason = "Blocking formatted I/O; also commonly non-reentrant depending on the libc (e.g. newlib's malloc-based buffering)."
+fix = "Use a lock-free ring buffer or ITM/SWO tracing for ISR-context logging instead."
+
+[HAL_Delay]
+category = "stm32_hal"
+blocking = true
+reason = "Busy-waits on the SysTick counter; SysTick may be masked or re-entered from inside another ISR, causing a hang."
+fix = "Never delay inside an ISR; schedule the follow-up work for the main loop instead."
+
+[HAL_UART_Transmit]
+category = "stm32_hal"
+blocking = true
+reason = "Blocking polling-mode transmit; ties up the ISR until the whole buffer is sent."
+fix = "Use HAL_UART_Transmit_IT or HAL_UART_Transmit_DMA instead."
+
+[HAL_UART_Receive]
+category = "stm32_hal"
+blocking = true
+reason = "Blocking polling-mode receive; ties up the ISR until the whole buffer arrives or times out."
+fix = "Use HAL_UART_Receive_IT or HAL_UART_Receive_DMA instead."
+
+[HAL_SPI_Transmit]
+category = "stm32_hal"
+blocking = true
+reason = "Blocking polling-mode transmit; ties up the ISR until the whole buffer is sent."
+fix = "Use HAL_SPI_Transmit_IT or HAL_SPI_Transmit_DMA instead."
+
+[HAL_I2C_Master_Transmit]
+category = "stm32_hal"
+blocking = true
+reason = "Blocking polling-mode transmit; ties up the ISR until the whole transfer completes."
+fix = "Use HAL_I2C_Master_Transmit_IT or HAL_I2C_Master_Transmit_DMA instead."
+
+[xQueueSend]
+category = "freertos"
+blocking = true
+reason = "Not ISR-safe — may internally attempt to block/yield, which is undefined behaviour in interrupt context."
+fix = "Use xQueueSendFromISR instead."
+safe_sibling = "xQueueSendFromISR"
+
+[xQueueReceive]
+category = "freertos"
+blocking = true
+reason = "Not ISR-safe — may internally attempt to block/yield, which is undefined behaviour in interrupt context."
+fix = "Use xQueueReceiveFromISR instead."
+safe_sibling = "xQueueReceiveFromISR"
+
+[xSemaphoreGive]
+category = "freertos"
+blocking = true
+reason = "Not ISR-safe — may internally attempt to block/yield, which is undefined behaviour in interrupt context."
+fix = "Use xSemaphoreGiveFromISR instead."
+safe_sibling = "xSemaphoreGiveFromISR"
+
+[xSemaphoreTake]
+category = "freertos"
+blocking = true
+reason = "Not ISR-safe — may internally attempt to block/yield, which is undefined behaviour in interrupt context."
+fix = "Use xSemaphoreTakeFromISR instead."
+safe_sibling = "xSemaphoreTakeFromISR"
+
+[vTaskDelay]
+category = "freertos"
+blocking = true
+reason = "Blocks the calling task — meaningless and unsafe inside an ISR, which has no task context."
+fix = "There is no ISR-safe equivalent; restructure the work to run in a task instead."

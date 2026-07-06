@@ -47,7 +47,12 @@ def explain_findings(findings: list[Finding]) -> list[Finding]:
     Annotate findings with LLM explanations and optionally suppress false positives.
 
     Findings are mutated in place; none are ever added or removed from the list.
-    If ANTHROPIC_API_KEY is unset, the list is returned unchanged.
+    If ANTHROPIC_API_KEY is unset, the list is returned unchanged. Findings that
+    already carry an explanation (e.g. a data-driven Tier 1 rule like
+    isr-blocking-call, which derives its explanation deterministically from a
+    curated table) are left untouched — there's nothing for the LLM to add,
+    and re-triaging a rule that's precise by construction only risks an
+    incorrect suppression.
     """
     if not findings:
         return findings
@@ -55,6 +60,8 @@ def explain_findings(findings: list[Finding]) -> list[Finding]:
     client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
 
     for finding in findings:
+        if finding.explanation:
+            continue
         try:
             ctx = build_context(finding)
             prompt = build_prompt(finding, ctx)

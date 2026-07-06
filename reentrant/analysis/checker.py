@@ -5,11 +5,12 @@ from collections import defaultdict
 from pathlib import Path
 
 from reentrant.analysis.access_walker import FunctionAccesses, walk_file_accesses
+from reentrant.analysis.blocking_calls import find_blocking_calls
 from reentrant.analysis.guards import build_guard_map
 from reentrant.analysis.isr_roots import find_isr_roots
 from reentrant.model.callgraph import build_call_graph
 from reentrant.model.findings import Access, Confidence, Finding
-from reentrant.model.rules import ISR_SHARED_VAR
+from reentrant.model.rules import ISR_BLOCKING_CALL, ISR_SHARED_VAR
 from reentrant.model.symbols import SymbolTable, build_symbol_table
 from reentrant.parse.loader import ParsedFile
 
@@ -39,10 +40,37 @@ def analyze(files: list[ParsedFile]) -> list[Finding]:
     for pf in files:
         all_accesses.extend(walk_file_accesses(pf, table, isr_context))
 
-    return _check(all_accesses, table, files, isr_context)
+    findings = _check_shared_vars(all_accesses, table, files, isr_context)
+    findings += _check_blocking_calls(files, isr_context)
+    return findings
 
 
-def _check(
+def _check_blocking_calls(files: list[ParsedFile], isr_context: set[str]) -> list[Finding]:
+    findings: list[Finding] = []
+    for site in find_blocking_calls(files, isr_context):
+        findings.append(Finding(
+            variable=site.api_name,
+            declaring_file=site.file,
+            declaring_line=site.line,
+            type_text=site.entry.category,
+            isr_functions=[site.calling_function],
+            non_isr_accesses=[],
+            isr_accesses=[Access(
+                variable=site.api_name,
+                file=site.file,
+                line=site.line,
+                is_write=True,
+                in_isr_context=True,
+                function=site.calling_function,
+            )],
+            rule_id=ISR_BLOCKING_CALL.id,
+            confidence=Confidence.HIGH,
+            explanation=f"{site.entry.reason} Fix: {site.entry.fix}",
+        ))
+    return findings
+
+
+def _check_shared_vars(
     all_accesses: list[FunctionAccesses],
     table: SymbolTable,
     files: list[ParsedFile],

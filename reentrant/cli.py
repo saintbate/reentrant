@@ -40,24 +40,33 @@ def _run_explain(findings: list[Finding]) -> None:
 
 
 def _print_findings_table(findings: list[Finding], title: str) -> None:
+    # Column set is rule-neutral: "Non-ISR access" only makes sense for the
+    # shared-variable race rule (a blocking-call finding has no such thing),
+    # and "Explanation" covers both LLM-generated and table-driven text.
+    has_non_isr = any(f.non_isr_accesses for f in findings)
     has_explanations = any(f.explanation for f in findings)
+
     table = Table(title=title, show_lines=True)
-    table.add_column("Variable", style="bold red")
-    table.add_column("Declared at")
+    table.add_column("Subject", style="bold red")
+    table.add_column("Location")
     table.add_column("ISR context")
-    table.add_column("Non-ISR access")
+    if has_non_isr:
+        table.add_column("Non-ISR access")
     if has_explanations:
-        table.add_column("Race condition", max_width=60, no_wrap=False)
+        table.add_column("Explanation", max_width=60, no_wrap=False)
 
     for f in findings:
         isr_names = ", ".join(f.isr_functions[:2]) + ("…" if len(f.isr_functions) > 2 else "")
-        non_isr_loc = f"{f.sample_non_isr_file.name}:{f.sample_non_isr_line}"
         row: list[str] = [
             f.variable,
             f"{f.declaring_file.name}:{f.declaring_line}",
             isr_names,
-            non_isr_loc,
         ]
+        if has_non_isr:
+            non_isr_loc = ""
+            if f.non_isr_accesses:
+                non_isr_loc = f"{f.sample_non_isr_file.name}:{f.sample_non_isr_line}"
+            row.append(non_isr_loc)
         if has_explanations:
             row.append(f.explanation or "")
         table.add_row(*row)
@@ -148,10 +157,7 @@ def analyze_cmd(
         console.print(f"[dim]({n} finding(s) suppressed by LLM as likely false positives)[/dim]")
 
     if blocking:
-        console.print(
-            f"[yellow]{len(blocking)} potential ISR-safety issue(s). "
-            "Add 'volatile' or wrap non-ISR accesses in a critical section.[/yellow]"
-        )
+        console.print(f"[yellow]{len(blocking)} blocking ISR-safety issue(s) found.[/yellow]")
         raise SystemExit(1)
 
     console.print(f"[dim]{len(advisory)} advisory finding(s) — review at your discretion.[/dim]")
