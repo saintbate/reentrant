@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from reentrant.analysis.checker import analyze
-from reentrant.model.rules import ISR_BLOCKING_CALL
+from reentrant.model.rules import ISR_BLOCKING_CALL, ISR_STALE_READ, Tier
 from reentrant.parse.loader import load_repo
 
 CORPUS = Path(__file__).parent / "corpus"
@@ -42,7 +42,8 @@ def test_bug_detected(filename: str, expected_var: str) -> None:
 @pytest.mark.parametrize("filename", [
     "safe_01_volatile.c",
     "safe_02_critical_section.c",
-    "safe_03_readonly.c",
+    # safe_03_readonly.c is NOT here — it's a genuine isr-stale-read Tier 2
+    # candidate, see test_stale_read_detected below
     "safe_04_freertos_guard.c",
     "safe_05_isr_only.c",
     # ARM PRIMASK save/disable/restore pattern
@@ -58,6 +59,11 @@ def test_bug_detected(filename: str, expected_var: str) -> None:
     # CMSIS-RTOS-style inHandlerMode() dual-dispatch wrapper — real-world FP
     # found via tests/measure_fp.py, must not be flagged
     "safe_11_freertos_dual_dispatch.c",
+    # volatile threshold, read-only in ISR — isr-stale-read must respect
+    # the same volatile suppression as isr-shared-var
+    "safe_12_volatile_threshold.c",
+    # non-ISR write is guarded — isr-stale-read must respect guards too
+    "safe_13_guarded_threshold.c",
 ])
 def test_no_false_positive(filename: str) -> None:
     findings = _analyze_file(filename)
@@ -82,6 +88,21 @@ def test_blocking_call_detected(filename: str, expected_api: str) -> None:
     )
     assert matches[0].rule_id == ISR_BLOCKING_CALL.id
     assert matches[0].explanation, "blocking-call findings must self-explain from the API table"
+
+
+# ── isr-stale-read rule (Tier 2): ISR reads what non-ISR writes ──────────────
+
+def test_stale_read_detected() -> None:
+    """threshold in safe_03_readonly.c is read-only in the ISR and written
+    (unguarded, non-volatile) in set_threshold() — a genuine stale-read
+    candidate. It must be Tier 2: advisory only, never blocking.
+    """
+    findings = _analyze_file("safe_03_readonly.c")
+    matches = [f for f in findings if f.variable == "threshold"]
+    assert matches, f"expected 'threshold' to be flagged, got {[f.variable for f in findings]}"
+    assert matches[0].rule_id == ISR_STALE_READ.id
+    assert matches[0].tier is Tier.TIER_2
+    assert matches[0].can_block is False
 
 
 # ── Static-scope isolation — multi-file scenarios ─────────────────────────────

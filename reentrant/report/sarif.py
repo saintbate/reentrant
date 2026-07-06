@@ -5,7 +5,7 @@ from importlib.metadata import version
 from typing import Any
 
 from reentrant.model.findings import Finding
-from reentrant.model.rules import ISR_BLOCKING_CALL, ISR_SHARED_VAR, Tier, all_rules
+from reentrant.model.rules import ISR_BLOCKING_CALL, ISR_SHARED_VAR, ISR_STALE_READ, Tier, all_rules
 
 TOOL_VERSION = version("reentrant")
 
@@ -28,6 +28,15 @@ def _build_message(f: Finding) -> str:
     elif f.rule_id == ISR_BLOCKING_CALL.id:
         isr_list = ", ".join(f.isr_functions)
         msg = f"'{f.variable}' is called from ISR context ({isr_list}) but is not ISR-safe."
+    elif f.rule_id == ISR_STALE_READ.id:
+        isr_list = ", ".join(f.isr_functions)
+        write_fns = ", ".join(sorted({acc.function for acc in f.non_isr_accesses if acc.is_write}))
+        msg = (
+            f"Variable '{f.variable}' ({f.type_text}) is only read in ISR context "
+            f"({isr_list}) but is written in non-ISR code ({write_fns}) without "
+            f"'volatile' or a critical-section guard. The ISR may observe a stale "
+            f"or torn value."
+        )
     else:
         msg = f"{f.rule.title}: '{f.variable}'."
 

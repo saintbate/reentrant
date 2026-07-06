@@ -45,6 +45,12 @@ A call is *not* flagged if the same function also calls the ISR-safe counterpart
 (e.g. `xSemaphoreGiveFromISR`) — that's the CMSIS-RTOS `inHandlerMode()` runtime-dispatch
 pattern every STM32Cube + FreeRTOS project ships, not a bug.
 
+**`isr-stale-read`** (Tier 2, advisory) — the inverse of `isr-shared-var`: an ISR only
+*reads* a variable that non-ISR code writes without `volatile` or a guard. The ISR may
+see a stale or torn value, but this pattern is common and mostly benign for
+write-once-at-init config/threshold variables, so it's advisory only rather than
+blocking — see [Tiers](#tiers).
+
 ## What it does NOT flag (safe patterns recognised)
 
 | Guard | Example |
@@ -56,7 +62,6 @@ pattern every STM32Cube + FreeRTOS project ships, not a bug.
 | FreeRTOS `taskENTER_CRITICAL` / `taskEXIT_CRITICAL` | |
 | FreeRTOS `portDISABLE_INTERRUPTS` / `portENABLE_INTERRUPTS` | |
 | ISR-only variables (no non-ISR access) | |
-| Variables only read by ISR, never written | |
 
 ## Install
 
@@ -97,10 +102,13 @@ Every rule is Tier 1 (precise enough to fail CI) or Tier 2 (advisory — shown a
 comment, never blocks). The exit code depends **only** on Tier 1: a noisy heuristic
 can never fail your build, no matter how it's classified internally.
 
-Both current rules — `isr-shared-var` and `isr-blocking-call` — are Tier 1,
-validated at 0% false positives against the real-world benchmark corpus. Future
-heuristic/dataflow rules will land as Tier 2 first and only get promoted once they
-clear the same bar.
+`isr-shared-var` and `isr-blocking-call` are Tier 1, validated at 0% false positives
+against the real-world benchmark corpus. `isr-stale-read` is the first Tier 2 rule —
+by design it's noisier (config/threshold variables written once at init produce many
+candidates that look identical to real bugs from a purely syntactic view), which is
+why it's advisory-only. Run against the real-world benchmark: 49 raw candidates, of
+which LLM triage (see below) suppressed 31 (63%) as implausible, leaving 18 for
+review — a working demonstration of the Tier 2 + LLM-triage design, not just a plan.
 
 ### Diff-aware scoping
 
@@ -112,12 +120,18 @@ write *or* the unguarded read *or* changed the declaration (e.g. dropped `volati
 pre-existing bugs the PR didn't touch are suppressed, so a PR doesn't get buried under
 issues it had nothing to do with.
 
-## LLM explanation layer
+## LLM explanation layer (Tier 2 triage)
 
 Set `ANTHROPIC_API_KEY` to enable a post-analysis pass using Claude Haiku that:
 
 - Generates a plain-English description of the race condition and a one-line fix suggestion
-- Suppresses likely false positives it can identify from context
+- Suppresses likely false positives it can identify from full function context
+
+This is also how Tier 2 candidates get triaged before showing up as advisory findings
+— the same pass runs on every finding. Rules that already self-explain deterministically
+(`isr-blocking-call`, from its curated table) are skipped: there's nothing for the LLM
+to add, and re-triaging a rule that's precise by construction only risks an incorrect
+suppression.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...

@@ -79,3 +79,19 @@ ISR_BLOCKING_CALL = register(Rule(
         "for the full curated list and the reasoning behind each entry."
     ),
 ))
+
+ISR_STALE_READ = register(Rule(
+    id="reentrant/isr-stale-read",
+    tier=Tier.TIER_2,
+    title="ISR reads a variable written elsewhere without volatile or guard",
+    description=(
+        "An ISR (or a function transitively reachable from one) only reads a "
+        "global or static variable that is written in non-ISR code without "
+        "the 'volatile' qualifier or a recognised critical-section guard. "
+        "The ISR may observe a stale or torn value. This is the inverse of "
+        "isr-shared-var and is intentionally Tier 2: config/threshold-style "
+        "variables that are written once before the ISR is ever enabled "
+        "produce many false positives here, so it's advisory-only pending "
+        "LLM triage or manual review."
+    ),
+))
