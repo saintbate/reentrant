@@ -13,6 +13,7 @@ from rich.table import Table
 
 from reentrant.analysis.checker import analyze
 from reentrant.diffscope import filter_by_diff, git_diff_lines
+from reentrant.feedback import DEFAULT_FEEDBACK_PATH, append_feedback, build_record
 from reentrant.model.findings import Confidence, Finding
 from reentrant.parse.loader import load_repo
 from reentrant.report.sarif import to_sarif
@@ -164,5 +165,42 @@ def analyze_cmd(
     raise SystemExit(0)
 
 
-# Alias for ergonomics
+@main.command()
+@click.option("--rule", "rule_id", required=True, help="Rule id, e.g. reentrant/isr-shared-var.")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("line", type=int)
+@click.option(
+    "--verdict",
+    type=click.Choice(["fp", "tp", "unsure"]),
+    required=True,
+    help="fp = false positive, tp = true positive (real bug), unsure = can't tell.",
+)
+@click.option("--variable", default="", help="The flagged variable or call name, for readability.")
+@click.option("--note", default="", help="Free-text context for why you gave this verdict.")
+@click.option(
+    "--out", "out_path", type=click.Path(path_type=Path), default=DEFAULT_FEEDBACK_PATH,
+    help=f"JSONL log to append to (default: {DEFAULT_FEEDBACK_PATH}).",
+)
+def feedback_cmd(
+    rule_id: str, file: Path, line: int, verdict: str, variable: str, note: str, out_path: Path
+) -> None:
+    """Record a human verdict on a finding: reentrant feedback --rule ID --verdict fp FILE LINE.
+
+    Appends one record (rule, tier, code context, verdict) to a JSONL log —
+    the labeled dataset the reframe spec calls for. This is what a
+    '/false-positive' PR comment resolves to under the hood; see
+    .github/workflows/false-positive.yml for the automated trigger.
+    """
+    try:
+        record = build_record(rule_id, file, line, verdict, variable=variable, note=note)
+    except KeyError as e:
+        err_console.print(f"[red]{e}[/red]")
+        raise SystemExit(2) from e
+
+    append_feedback(record, out_path)
+    console.print(f"[green]✓ Recorded {verdict} verdict for '{rule_id}' → {out_path}[/green]")
+
+
+# Aliases for ergonomics
 main.add_command(analyze_cmd, name="analyze")
+main.add_command(feedback_cmd, name="feedback")

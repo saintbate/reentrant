@@ -185,6 +185,32 @@ jobs:
         run: exit 1
 ```
 
+## Feedback loop
+
+Disagree with a finding? Reply on the PR:
+
+```
+/false-positive reentrant/isr-shared-var Core/Src/main.c:42 initialised before ISR enabled
+```
+
+`.github/workflows/false-positive.yml` parses that, records the verdict (rule, tier,
+a snapshot of the surrounding code, your note) as one line in `.reentrant/feedback.jsonl`,
+and commits it back to the PR branch — a growing, labeled dataset of real bugs vs
+false positives, meant to eventually inform which heuristics graduate from Tier 2
+to Tier 1 (or get cut).
+
+The same thing works locally without a PR:
+
+```bash
+reentrant feedback --rule reentrant/isr-shared-var --verdict fp \
+  --note "initialised before ISR enabled" Core/Src/main.c 42
+```
+
+**Known limitation:** PRs from forks can't be committed back to — GitHub doesn't grant
+the base repo's Actions run write access to a fork's branch. Feedback on a fork PR is
+acknowledged with a comment but not persisted automatically; a maintainer can run the
+CLI command above locally instead.
+
 Findings appear as inline annotations on the PR diff in the **Security** tab.
 
 > The SARIF upload requires GitHub Advanced Security. This is free for all public repositories; private repositories need a GHAS licence.

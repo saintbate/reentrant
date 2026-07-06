@@ -1,0 +1,123 @@
+name: False Positive Feedback
+
+# Lets a reviewer reply "/false-positive <rule-id> <file>:<line> [note]" on a
+# PR to log a verdict into the labeled dataset (see reentrant/feedback/).
+#
+# Known limitation: PRs from forks can't be committed back to (GitHub
+# restricts write access to fork branches from the base repo's Actions run).
+# Feedback on fork PRs is acknowledged but not persisted automatically —
+# a maintainer can run `reentrant feedback` locally instead.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  record-feedback:
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/false-positive')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # Parses the comment and looks up the PR's head ref via the API rather
+      # than trusting comment text for anything beyond rule/file/line/note.
+      - name: Parse the /false-positive command
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            const m = body.match(/^\/false-positive\s+(\S+)\s+([^:\s]+):(\d+)\s*(.*)$/s);
+            if (!m) {
+              core.setFailed(
+                "Usage: /false-positive <rule-id> <file>:<line> [note]\n" +
+                "Example: /false-positive reentrant/isr-shared-var Core/Src/main.c:42 " +
+                "initialised before ISR enabled"
+              );
+              return;
+            }
+            const [, rule, file, line, note] = m;
+            core.setOutput("rule", rule);
+            core.setOutput("file", file);
+            core.setOutput("line", line);
+            core.setOutput("note", note);
+
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number,
+            });
+            const isFork = pr.data.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`;
+            core.setOutput("head_ref", pr.data.head.ref);
+            core.setOutput("is_fork", isFork ? "true" : "false");
+
+      - name: Checkout PR branch
+        if: steps.parse.outputs.is_fork != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.parse.outputs.head_ref }}
+
+      - name: Install reentrant
+        if: steps.parse.outputs.is_fork != 'true'
+        run: pip install reentrant
+
+      # Untrusted values (rule/file/line/note come from the PR comment body)
+      # are passed via env vars, never interpolated directly into the script
+      # body — that's the difference between a shell argument and arbitrary
+      # code execution in a GitHub Actions run.
+      - name: Record feedback
+        if: steps.parse.outputs.is_fork != 'true'
+        env:
+          RULE: ${{ steps.parse.outputs.rule }}
+          FILE: ${{ steps.parse.outputs.file }}
+          LINE: ${{ steps.parse.outputs.line }}
+          NOTE: ${{ steps.parse.outputs.note }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          reentrant feedback \
+            --rule "$RULE" \
+            --verdict fp \
+            --note "$NOTE (via PR comment by @$COMMENTER)" \
+            "$FILE" "$LINE"
+
+      - name: Commit feedback log
+        if: steps.parse.outputs.is_fork != 'true'
+        env:
+          HEAD_REF: ${{ steps.parse.outputs.head_ref }}
+        run: |
+          git config user.name "reentrant-bot"
+          git config user.email "actions@github.com"
+          git add .reentrant/feedback.jsonl
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Record false-positive feedback from PR comment"
+            git push origin "HEAD:$HEAD_REF"
+          fi
+
+      - name: React to the comment
+        if: always() && steps.parse.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isFork = "${{ steps.parse.outputs.is_fork }}" === "true";
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: isFork ? "confused" : "+1",
+            });
+            if (isFork) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body: "Feedback noted, but I can't commit back to a fork's branch — " +
+                  "that needs write access reentrant doesn't have for external PRs. " +
+                  "A maintainer can run `reentrant feedback` locally instead.",
+              });
+            }
