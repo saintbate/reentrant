@@ -17,7 +17,12 @@ from reentrant.model.findings import Confidence, Finding
 from reentrant.parse.loader import load_repo
 from reentrant.report.sarif import to_sarif
 
+# Human-readable results (tables, final status) — the only thing on stdout
+# in --json/--sarif mode is the bare print() payload built from that data.
 console = Console()
+# Progress/diagnostic messages always go to stderr so `--json`/`--sarif`
+# output can be piped straight to a file without being corrupted by them.
+err_console = Console(stderr=True)
 
 
 @click.group()
@@ -27,11 +32,37 @@ def main() -> None:
 
 def _run_explain(findings: list[Finding]) -> None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print("[dim]LLM explanation skipped — set ANTHROPIC_API_KEY to enable.[/dim]")
+        err_console.print("[dim]LLM explanation skipped — set ANTHROPIC_API_KEY to enable.[/dim]")
         return
     from reentrant.explain.llm import explain_findings
-    console.print(f"[dim]Running LLM on {len(findings)} finding(s)…[/dim]")
+    err_console.print(f"[dim]Running LLM on {len(findings)} finding(s)…[/dim]")
     explain_findings(findings)
+
+
+def _print_findings_table(findings: list[Finding], title: str) -> None:
+    has_explanations = any(f.explanation for f in findings)
+    table = Table(title=title, show_lines=True)
+    table.add_column("Variable", style="bold red")
+    table.add_column("Declared at")
+    table.add_column("ISR context")
+    table.add_column("Non-ISR access")
+    if has_explanations:
+        table.add_column("Race condition", max_width=60, no_wrap=False)
+
+    for f in findings:
+        isr_names = ", ".join(f.isr_functions[:2]) + ("…" if len(f.isr_functions) > 2 else "")
+        non_isr_loc = f"{f.sample_non_isr_file.name}:{f.sample_non_isr_line}"
+        row: list[str] = [
+            f.variable,
+            f"{f.declaring_file.name}:{f.declaring_line}",
+            isr_names,
+            non_isr_loc,
+        ]
+        if has_explanations:
+            row.append(f.explanation or "")
+        table.add_row(*row)
+
+    console.print(table)
 
 
 @main.command()
@@ -55,21 +86,23 @@ def analyze_cmd(
         files = [f for f in files if f.path == path.resolve()]
 
     if not files:
-        console.print("[yellow]No C/H files found.[/yellow]")
+        err_console.print("[yellow]No C/H files found.[/yellow]")
         raise SystemExit(0)
 
-    console.print(f"[dim]Analyzing {len(files)} file(s)…[/dim]")
+    err_console.print(f"[dim]Analyzing {len(files)} file(s)…[/dim]")
     findings = analyze(files)
 
     if diff_base is not None:
         try:
             changed_lines = git_diff_lines(root, diff_base)
         except subprocess.CalledProcessError as e:
-            console.print(f"[red]Failed to diff against '{diff_base}': {e.stderr.strip()}[/red]")
+            err_console.print(
+                f"[red]Failed to diff against '{diff_base}': {e.stderr.strip()}[/red]"
+            )
             raise SystemExit(2) from e
         before = len(findings)
         findings = filter_by_diff(findings, changed_lines, root)
-        console.print(
+        err_console.print(
             f"[dim]Diff scope ({diff_base}): {len(findings)}/{before} finding(s) "
             "touch changed lines.[/dim]"
         )
@@ -80,13 +113,18 @@ def analyze_cmd(
     active = [f for f in findings if f.confidence != Confidence.LOW]
     suppressed_count = len(findings) - len(active)
 
+    # Tier 1 findings can fail CI; Tier 2 are advisory-only, always, regardless
+    # of confidence — this is the whole point of the tier split.
+    blocking = [f for f in active if f.can_block]
+    advisory = [f for f in active if not f.can_block]
+
     if output_json:
         print(json.dumps([dataclasses.asdict(f) for f in findings], default=str, indent=2))
-        raise SystemExit(1 if active else 0)
+        raise SystemExit(1 if blocking else 0)
 
     if output_sarif:
         print(json.dumps(to_sarif(active), indent=2))
-        raise SystemExit(1 if active else 0)
+        raise SystemExit(1 if blocking else 0)
 
     if not active:
         if suppressed_count:
@@ -98,37 +136,26 @@ def analyze_cmd(
             console.print("[green]✓ No ISR-safety issues found.[/green]")
         raise SystemExit(0)
 
-    has_explanations = any(f.explanation for f in active)
-    table = Table(title=f"ISR-safety findings ({len(active)})", show_lines=True)
-    table.add_column("Variable", style="bold red")
-    table.add_column("Declared at")
-    table.add_column("ISR context")
-    table.add_column("Non-ISR access")
-    if has_explanations:
-        table.add_column("Race condition", max_width=60, no_wrap=False)
+    if blocking:
+        _print_findings_table(blocking, f"Blocking ISR-safety issues ({len(blocking)})")
+    if advisory:
+        _print_findings_table(
+            advisory, f"Advisory heuristics — does not fail CI ({len(advisory)})"
+        )
 
-    for f in active:
-        isr_names = ", ".join(f.isr_functions[:2]) + ("…" if len(f.isr_functions) > 2 else "")
-        non_isr_loc = f"{f.sample_non_isr_file.name}:{f.sample_non_isr_line}"
-        row: list[str] = [
-            f.variable,
-            f"{f.declaring_file.name}:{f.declaring_line}",
-            isr_names,
-            non_isr_loc,
-        ]
-        if has_explanations:
-            row.append(f.explanation or "")
-        table.add_row(*row)
-
-    console.print(table)
     if suppressed_count:
         n = suppressed_count
         console.print(f"[dim]({n} finding(s) suppressed by LLM as likely false positives)[/dim]")
-    console.print(
-        f"[yellow]{len(active)} potential ISR-safety issue(s). "
-        "Add 'volatile' or wrap non-ISR accesses in a critical section.[/yellow]"
-    )
-    raise SystemExit(1)
+
+    if blocking:
+        console.print(
+            f"[yellow]{len(blocking)} potential ISR-safety issue(s). "
+            "Add 'volatile' or wrap non-ISR accesses in a critical section.[/yellow]"
+        )
+        raise SystemExit(1)
+
+    console.print(f"[dim]{len(advisory)} advisory finding(s) — review at your discretion.[/dim]")
+    raise SystemExit(0)
 
 
 # Alias for ergonomics

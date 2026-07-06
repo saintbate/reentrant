@@ -6,6 +6,7 @@ from pathlib import Path
 
 from reentrant.diffscope import filter_by_diff, git_diff_lines, parse_unified_diff
 from reentrant.model.findings import Access, Finding
+from reentrant.model.rules import ISR_SHARED_VAR
 
 # A hand-verified -U0 diff: line 2 modified ("int b;" -> "int x;"),
 # line 4 newly appended ("int d;"). Expected changed lines: {2, 4}.
@@ -52,6 +53,7 @@ def _finding(
         declaring_line=declaring_line,
         type_text="int",
         isr_functions=["Some_IRQHandler"],
+        rule_id=ISR_SHARED_VAR.id,
         isr_accesses=[
             Access(
                 variable="v", file=declaring_file, line=isr_line,

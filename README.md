@@ -58,6 +58,9 @@ reentrant analyze ./path/to/firmware/
 # Single file
 reentrant analyze src/main.c
 
+# PR-scoped: only report findings that touch lines changed since origin/main
+reentrant analyze . --diff-base origin/main
+
 # SARIF output for GitHub Code Scanning
 reentrant analyze . --sarif --no-explain > reentrant.sarif
 
@@ -68,7 +71,29 @@ reentrant analyze . --json --no-explain
 reentrant analyze . --no-explain
 ```
 
-Exit code `0` — no findings (or all suppressed by LLM). Exit code `1` — findings present.
+Exit code `0` — no blocking findings (or all suppressed by LLM). Exit code `1` — at
+least one Tier 1 finding present. See [Tiers](#tiers) below.
+
+### Tiers
+
+Every rule is Tier 1 (precise enough to fail CI) or Tier 2 (advisory — shown as a PR
+comment, never blocks). The exit code depends **only** on Tier 1: a noisy heuristic
+can never fail your build, no matter how it's classified internally.
+
+Today `isr-shared-var` (the core race check) is the only rule, and it's Tier 1 —
+validated at 0% false positives against the real-world benchmark corpus. Future
+heuristic/dataflow rules will land as Tier 2 first and only get promoted once they
+clear the same bar.
+
+### Diff-aware scoping
+
+`--diff-base <ref>` scopes findings to a PR: analysis still runs whole-repo (ISR
+reachability genuinely needs the full call graph), but the reported findings are
+filtered to ones where the declaration, the ISR access, or the non-ISR access falls
+on a line the diff touched. A finding surfaces if the PR introduced the unsafe ISR
+write *or* the unguarded read *or* changed the declaration (e.g. dropped `volatile`) —
+pre-existing bugs the PR didn't touch are suppressed, so a PR doesn't get buried under
+issues it had nothing to do with.
 
 ## LLM explanation layer
 
@@ -105,13 +130,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — required for --diff-base to work
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install reentrant
       - name: Run ISR safety analysis
         id: reentrant
-        run: reentrant analyze . --sarif --no-explain > reentrant.sarif
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            DIFF_ARGS="--diff-base origin/${{ github.base_ref }}"
+          else
+            DIFF_ARGS=""
+          fi
+          reentrant analyze . --sarif --no-explain $DIFF_ARGS > reentrant.sarif
         continue-on-error: true
       - uses: github/codeql-action/upload-sarif@v3
         with:
@@ -129,7 +162,6 @@ Findings appear as inline annotations on the PR diff in the **Security** tab.
 
 - C only (no C++)
 - Single-core Cortex-M — does not model multi-core shared memory (STM32H7 M4/M7)
-- `static` variables with the same name in different translation units share a symbol table entry; the checker may miss bugs or produce false positives in that case
 - Does not model OS-level mutual exclusion (mutexes, semaphores) — only interrupt-disable guards
 - Does not detect ABA / lock-free algorithmic correctness issues
 
@@ -140,6 +172,6 @@ git clone https://github.com/saintbate/reentrant
 cd reentrant
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                  # 14 corpus tests
-python tests/measure_fp.py  # real-world FP measurement
+pytest                       # corpus + diff-scoping + tier-system tests
+python tests/measure_fp.py   # real-world FP measurement
 ```

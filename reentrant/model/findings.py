@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from reentrant.model.rules import Rule, Tier, get_rule
+
 
 class Confidence(str, Enum):
     HIGH = "high"      # emit by default
@@ -31,8 +33,22 @@ class Finding:
     isr_functions: list[str]          # ISR-context functions that access this var
     non_isr_accesses: list[Access]
     isr_accesses: list[Access]
+    rule_id: str                      # which registered Rule produced this finding
     confidence: Confidence = Confidence.HIGH
     explanation: str = ""             # filled in by LLM layer
+
+    @property
+    def rule(self) -> Rule:
+        return get_rule(self.rule_id)
+
+    @property
+    def tier(self) -> Tier:
+        return self.rule.tier
+
+    @property
+    def can_block(self) -> bool:
+        """Whether this finding is allowed to fail CI (Tier 1 only)."""
+        return self.rule.can_block
 
     @property
     def primary_isr(self) -> str:

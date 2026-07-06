@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 import anthropic
 
@@ -14,7 +15,7 @@ _MODEL = "claude-haiku-4-5"
 _MAX_TOKENS = 512
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str) -> dict[str, Any]:
     text = text.strip()
     # Strip markdown code fences if the model wrapped the output
     if text.startswith("```"):
@@ -22,10 +23,11 @@ def _extract_json(text: str) -> dict:
         text = "\n".join(lines[1:] if lines[-1] != "```" else lines[1:-1])
     # Grab the first {...} block in case there is surrounding prose
     m = re.search(r"\{.*\}", text, re.DOTALL)
-    return json.loads(m.group(0) if m else text)
+    result: dict[str, Any] = json.loads(m.group(0) if m else text)
+    return result
 
 
-def _call_llm(client: anthropic.Anthropic, user_prompt: str) -> dict:
+def _call_llm(client: anthropic.Anthropic, user_prompt: str) -> dict[str, Any]:
     with client.messages.stream(
         model=_MODEL,
         max_tokens=_MAX_TOKENS,

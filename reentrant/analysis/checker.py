@@ -9,6 +9,7 @@ from reentrant.analysis.guards import build_guard_map
 from reentrant.analysis.isr_roots import find_isr_roots
 from reentrant.model.callgraph import build_call_graph
 from reentrant.model.findings import Access, Confidence, Finding
+from reentrant.model.rules import ISR_SHARED_VAR
 from reentrant.model.symbols import SymbolTable, build_symbol_table
 from reentrant.parse.loader import ParsedFile
 
@@ -97,6 +98,7 @@ def _check(
             isr_functions=sorted(isr_fns_by_var[var_key]),
             non_isr_accesses=non_isr,
             isr_accesses=isr_by_var[var_key],
+            rule_id=ISR_SHARED_VAR.id,
             confidence=Confidence.HIGH,
         ))
 

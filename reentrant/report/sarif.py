@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 from importlib.metadata import version
+from typing import Any
 
 from reentrant.model.findings import Finding
+from reentrant.model.rules import Tier, all_rules
 
 TOOL_VERSION = version("reentrant")
-RULE_ID = "reentrant/isr-shared-var"
+
+# Tier 1 findings render as blocking errors in the Security tab; Tier 2 are
+# advisory and never fail CI, so they render at a lower severity.
+_LEVEL_BY_TIER = {Tier.TIER_1: "error", Tier.TIER_2: "warning"}
 
 
-def to_sarif(findings: list[Finding]) -> dict:
+def to_sarif(findings: list[Finding]) -> dict[str, Any]:
     results = []
     for f in findings:
         isr_list = ", ".join(f.isr_functions)
@@ -22,9 +27,10 @@ def to_sarif(findings: list[Finding]) -> dict:
         if f.explanation and not f.explanation.startswith("[suppressed]"):
             msg += f" {f.explanation}"
         results.append({
-            "ruleId": RULE_ID,
-            "level": "warning",
+            "ruleId": f.rule_id,
+            "level": _LEVEL_BY_TIER[f.tier],
             "message": {"text": msg},
+            "properties": {"tags": [f.tier.value]},
             "locations": [{
                 "physicalLocation": {
                     "artifactLocation": {"uri": str(f.declaring_file), "uriBaseId": "%SRCROOT%"},
@@ -44,6 +50,20 @@ def to_sarif(findings: list[Finding]) -> dict:
             ],
         })
 
+    # Declare every registered rule (not just ones that fired this run) so
+    # GitHub Code Scanning has stable rule metadata across runs.
+    rules = [
+        {
+            "id": rule.id,
+            "name": rule.id.rsplit("/", 1)[-1],
+            "shortDescription": {"text": rule.title},
+            "fullDescription": {"text": rule.description},
+            "defaultConfiguration": {"level": _LEVEL_BY_TIER[rule.tier]},
+            "properties": {"tags": [rule.tier.value]},
+        }
+        for rule in all_rules()
+    ]
+
     return {
         "version": "2.1.0",
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -52,22 +72,8 @@ def to_sarif(findings: list[Finding]) -> dict:
                 "driver": {
                     "name": "reentrant",
                     "version": TOOL_VERSION,
-                    "informationUri": "https://github.com/your-org/reentrant",
-                    "rules": [{
-                        "id": RULE_ID,
-                        "name": "IsrSharedVariable",
-                        "shortDescription": {
-                            "text": "Shared variable accessed in ISR without volatile or guard",
-                        },
-                        "fullDescription": {"text": (
-                            "A global or static variable is read or written inside an ISR "
-                            "(or a function transitively called from one) and also accessed "
-                            "in non-ISR code, without the 'volatile' qualifier or a recognised "
-                            "critical-section wrapper. This is a potential data race on Cortex-M."
-                        )},
-                        "defaultConfiguration": {"level": "warning"},
-                        "helpUri": "https://github.com/your-org/reentrant/docs/rules/isr-shared-var.md",
-                    }],
+                    "informationUri": "https://github.com/saintbate/reentrant",
+                    "rules": rules,
                 }
             },
             "results": results,

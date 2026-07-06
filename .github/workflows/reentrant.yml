@@ -15,6 +15,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history — required for --diff-base to resolve the base ref
 
       - uses: actions/setup-python@v5
         with:
@@ -25,9 +27,18 @@ jobs:
 
       - name: Run ISR safety analysis
         id: reentrant
-        # Exit code 1 means findings were found — we still want the upload step
-        # to run, so continue-on-error is set and we re-raise at the end.
-        run: reentrant analyze . --sarif --no-explain > reentrant.sarif
+        # On a PR, scope findings to lines the PR actually touched — a
+        # pre-existing bug elsewhere in the repo shouldn't block this merge.
+        # Exit code 1 means a blocking (Tier 1) finding was found — we still
+        # want the upload step to run, so continue-on-error is set and we
+        # re-raise at the end.
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            DIFF_ARGS="--diff-base origin/${{ github.base_ref }}"
+          else
+            DIFF_ARGS=""
+          fi
+          reentrant analyze . --sarif --no-explain $DIFF_ARGS > reentrant.sarif
         continue-on-error: true
 
       - name: Upload to GitHub Code Scanning
@@ -37,7 +48,7 @@ jobs:
           # Shown as the tool name in the Security tab
           category: reentrant
 
-      - name: Fail if findings were found
+      - name: Fail if blocking findings were found
         if: steps.reentrant.outcome == 'failure'
         run: |
           echo "::error::Reentrant found ISR-safety issues. See the Security tab for details."
