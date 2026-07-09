@@ -5,8 +5,6 @@ not from loader.py.
 """
 from __future__ import annotations
 
-import warnings
-
 import tree_sitter_c
 from tree_sitter import Language, Node, Query, QueryCursor
 
@@ -14,9 +12,10 @@ C_LANGUAGE = Language(tree_sitter_c.language())
 
 
 def _q(src: str) -> Query:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        return C_LANGUAGE.query(src)
+    # Query(language, src) rather than language.query(src): the latter was
+    # removed in tree-sitter 0.26.0. Constructing Query directly works on
+    # every version we support (verified 0.25.2 and 0.26.0).
+    return Query(C_LANGUAGE, src)
 
 
 def qmatches(query: Query, node: Node) -> list[tuple[int, dict[str, list[Node]]]]:

@@ -68,7 +68,8 @@ blocking — see [Tiers](#tiers).
 Requires Python 3.11+.
 
 ```bash
-pip install reentrant
+# Not yet on PyPI — install directly from GitHub for now:
+pip install git+https://github.com/saintbate/reentrant.git
 ```
 
 ## Usage
