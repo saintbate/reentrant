@@ -244,3 +244,21 @@ pip install -e ".[dev]"
 pytest                       # corpus + diff-scoping + tier-system tests
 python tests/measure_fp.py   # real-world FP measurement
 ```
+
+### Publishing to PyPI
+
+Not yet published — `.github/workflows/publish.yml` is ready but needs a one-time
+setup on PyPI before the first release (PyPI Trusted Publishing — no API token to
+manage):
+
+1. Create a PyPI account if you don't have one, at pypi.org.
+2. Go to **pypi.org → Your account → Publishing** and add a new "pending publisher":
+   PyPI project name `reentrant`, GitHub owner `saintbate`, repository `reentrant`,
+   workflow name `publish.yml`, environment name `pypi`.
+3. Back in this repo, bump the version in `pyproject.toml`, commit, tag it
+   (`git tag v0.1.0 && git push origin v0.1.0`), then create a GitHub Release from
+   that tag. The workflow runs automatically and PyPI accepts the upload because it
+   trusts this exact repo + workflow — no secret ever touches this codebase.
+4. Once published, switch `pip install git+https://github.com/saintbate/reentrant.git`
+   back to `pip install reentrant` in this README and in both `reentrant.yml` and
+   `false-positive.yml`.

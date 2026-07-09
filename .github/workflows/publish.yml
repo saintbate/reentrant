@@ -1,0 +1,47 @@
+name: Publish to PyPI
+
+# Triggered by publishing a GitHub Release (tag the commit first, then
+# create a Release from that tag). Uses PyPI Trusted Publishing — no API
+# token stored as a secret; PyPI trusts this workflow directly via OIDC.
+# One-time setup required on pypi.org before the first release — see
+# README's Development section.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install build
+
+      - run: python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/reentrant
+    permissions:
+      id-token: write  # required for trusted publishing — do not add a token secret
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
