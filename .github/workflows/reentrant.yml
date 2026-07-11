@@ -22,9 +22,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      # TODO: switch to `pip install reentrant` once published to PyPI.
       - name: Install reentrant
-        run: pip install git+https://github.com/saintbate/reentrant.git
+        run: pip install reentrant
 
       - name: Run ISR safety analysis
         id: reentrant

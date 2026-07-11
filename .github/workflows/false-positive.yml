@@ -61,10 +61,9 @@ jobs:
         with:
           ref: ${{ steps.parse.outputs.head_ref }}
 
-      # TODO: switch to `pip install reentrant` once published to PyPI.
       - name: Install reentrant
         if: steps.parse.outputs.is_fork != 'true'
-        run: pip install git+https://github.com/saintbate/reentrant.git
+        run: pip install reentrant
 
       # Untrusted values (rule/file/line/note come from the PR comment body)
       # are passed via env vars, never interpolated directly into the script
