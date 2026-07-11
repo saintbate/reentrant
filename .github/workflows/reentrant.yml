@@ -1,9 +1,22 @@
 name: ISR Safety
 
+# This workflow doubles as (a) a live dogfooding check that the Action's
+# mechanics work on every push — install, run, SARIF upload — and (b) a
+# copy-pasteable template for real firmware repos (see the README's
+# GitHub Actions section for the version meant to be copied).
+#
+# It does NOT fail the build here: this repo has no real firmware to
+# protect, and tests/corpus/*.c contains deliberately-buggy fixtures used
+# by the test suite. Reentrant correctly finds them every time, which
+# would otherwise make this check permanently, misleadingly red. A real
+# firmware repo copying this workflow should keep the fail-on-findings
+# step from the README's template — it's removed only here.
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -26,20 +39,15 @@ jobs:
         run: pip install reentrant
 
       - name: Run ISR safety analysis
-        id: reentrant
-        # On a PR, scope findings to lines the PR actually touched — a
-        # pre-existing bug elsewhere in the repo shouldn't block this merge.
-        # Exit code 1 means a blocking (Tier 1) finding was found — we still
-        # want the upload step to run, so continue-on-error is set and we
-        # re-raise at the end.
+        # Findings here are almost certainly tests/corpus/*.c fixtures, not
+        # real bugs — informational only, does not fail the build.
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             DIFF_ARGS="--diff-base origin/${{ github.base_ref }}"
           else
             DIFF_ARGS=""
           fi
-          reentrant analyze . --sarif --no-explain $DIFF_ARGS > reentrant.sarif
-        continue-on-error: true
+          reentrant analyze . --sarif --no-explain $DIFF_ARGS > reentrant.sarif || true
 
       - name: Upload to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
@@ -47,9 +55,3 @@ jobs:
           sarif_file: reentrant.sarif
           # Shown as the tool name in the Security tab
           category: reentrant
-
-      - name: Fail if blocking findings were found
-        if: steps.reentrant.outcome == 'failure'
-        run: |
-          echo "::error::Reentrant found ISR-safety issues. See the Security tab for details."
-          exit 1
