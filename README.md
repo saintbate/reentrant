@@ -1,5 +1,8 @@
 # reentrant
 
+[![CI](https://github.com/saintbate/reentrant/actions/workflows/ci.yml/badge.svg)](https://github.com/saintbate/reentrant/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/reentrant.svg)](https://pypi.org/project/reentrant/)
+
 Static analysis for **ISR-safety bugs** in STM32 firmware written in C.
 
 Reentrant catches the class of bug where a global variable is written inside an interrupt service routine and also accessed in main-loop code without `volatile` or a critical-section guard — a data race that can cause silent corruption on ARM Cortex-M.
